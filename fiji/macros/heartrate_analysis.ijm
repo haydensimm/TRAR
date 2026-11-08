@@ -28,6 +28,11 @@ smoothWindow = 3;
 // Ask for a comment after each video? (true / false)
 askForComments = true;
 
+// Ask for a manually counted number of beats after each video? (true / false)
+// Manual_BPM = Manual_Beats / video duration * 60
+// (so count the beats over the WHOLE video)
+askForManualBeats = true;
+
 // ---------------- CHOOSE FOLDERS ----------------
 
 inputDir = getDirectory("Choose the INPUT folder containing the videos");
@@ -41,9 +46,12 @@ masterFile = outputDir + "master_heart_results.csv";
 // Header (only written if the CSV does not exist yet)
 if (!File.exists(masterFile)) {
     File.saveString(
-        "File,FPS,Frames,Duration_sec,Beats,BPM,Comments\n",
+        "File,FPS,Frames,Duration_sec,Beats,BPM,Manual_Beats,Manual_BPM,Comments\n",
         masterFile
     );
+} else if (indexOf(File.openAsString(masterFile), "Manual_Beats") < 0) {
+    exit("The existing master CSV has the old column layout (no Manual_Beats):\n" +
+         masterFile + "\n\nRename or move it, then run the macro again.");
 }
 
 // ---------------- BUILD VIDEO LIST ----------------
@@ -109,6 +117,7 @@ for (v = 0; v < nVideos; v++) {
     accepted = false;
     skipped = false;
     comment = "";
+    manualStr = "";
 
     // Repeat ROI drawing + analysis until the user accepts or skips
     while (!accepted && !skipped) {
@@ -270,12 +279,18 @@ for (v = 0; v < nVideos; v++) {
             ),
             "Accept and go to next video"
         );
+        if (askForManualBeats) {
+            Dialog.addString("Manual beat count (optional):", manualStr, 10);
+        }
         if (askForComments) {
             Dialog.addString("Comments (saved if you accept):", comment, 40);
         }
         Dialog.show();
 
         choice = Dialog.getChoice();
+        if (askForManualBeats) {
+            manualStr = String.trim(Dialog.getString());
+        }
         if (askForComments) {
             comment = Dialog.getString();
             // Commas would break the CSV columns
@@ -287,6 +302,20 @@ for (v = 0; v < nVideos; v++) {
             selectImage(plotID);
             saveAs("PNG", traceDir + baseName + "_trace.png");
 
+            // ---------------- MANUAL COUNT ----------------
+            manualBeatsOut = "";
+            manualBpmOut = "";
+            if (manualStr != "") {
+                manualBeats = parseFloat(manualStr);
+                if (isNaN(manualBeats)) {
+                    print("  WARNING: manual count '" + manualStr +
+                          "' is not a number; left blank");
+                } else {
+                    manualBeatsOut = "" + manualBeats;
+                    manualBpmOut = d2s((manualBeats / duration_sec) * 60, 1);
+                }
+            }
+
             // ---------------- APPEND TO MASTER CSV ----------------
             line =
                 baseName + "," +
@@ -295,11 +324,14 @@ for (v = 0; v < nVideos; v++) {
                 d2s(duration_sec, 3) + "," +
                 beats + "," +
                 d2s(bpm, 1) + "," +
+                manualBeatsOut + "," +
+                manualBpmOut + "," +
                 comment + "\n";
 
             File.append(line, masterFile);
 
             print("  Beats: " + beats + "   BPM: " + d2s(bpm, 1) +
+                  "   Manual beats: " + manualBeatsOut + "   Manual BPM: " + manualBpmOut +
                   "   (accepted on attempt " + attempt + ")");
             accepted = true;
 
