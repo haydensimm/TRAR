@@ -4,10 +4,13 @@
 // (e.g. on an external drive) and saves the master CSV
 // and trace PNGs to a chosen output folder (e.g. internal drive).
 //
-// For each video you are asked to draw a rectangle
-// around the ventricle. The trace is then shown and you choose to:
+// For each video you are first asked to choose which portion
+// of the video to analyze (scroll to the first and last frame),
+// then to draw a rectangle around the ventricle.
+// The trace is then shown and you choose to:
 //   - accept it and move on to the next video,
-//   - redraw the ventricle and re-analyze the same video, or
+//   - redraw the ventricle and re-analyze the same video,
+//   - change the analyzed time range and re-analyze, or
 //   - skip the video (nothing is saved for it).
 // =====================================================
 
@@ -29,9 +32,15 @@ smoothWindow = 3;
 askForComments = true;
 
 // Ask for a manually counted number of beats after each video? (true / false)
-// Manual_BPM = Manual_Beats / video duration * 60
-// (so count the beats over the WHOLE video)
+// Manual_BPM = Manual_Beats / analyzed duration * 60
+// (so count the beats over the SAME portion of video you selected to analyze;
+//  the whole video if you did not trim it)
 askForManualBeats = true;
+
+// Let me choose which portion (frame range) of each video to analyze?
+// (true = scroll to the first and last frame for each video;
+//  false = always analyze the whole video)
+selectTimeRange = true;
 
 // ---------------- CHOOSE FOLDERS ----------------
 
@@ -46,11 +55,11 @@ masterFile = outputDir + "master_heart_results.csv";
 // Header (only written if the CSV does not exist yet)
 if (!File.exists(masterFile)) {
     File.saveString(
-        "File,FPS,Frames,Duration_sec,Beats,BPM,Manual_Beats,Manual_BPM,Comments\n",
+        "File,FPS,Start_Frame,End_Frame,Frames,Duration_sec,Beats,BPM,Manual_Beats,Manual_BPM,Comments\n",
         masterFile
     );
-} else if (indexOf(File.openAsString(masterFile), "Manual_Beats") < 0) {
-    exit("The existing master CSV has the old column layout (no Manual_Beats):\n" +
+} else if (indexOf(File.openAsString(masterFile), "Start_Frame") < 0) {
+    exit("The existing master CSV has the old column layout (no Start_Frame):\n" +
          masterFile + "\n\nRename or move it, then run the macro again.");
 }
 
@@ -113,6 +122,10 @@ for (v = 0; v < nVideos; v++) {
     }
 
     videoID = getImageID();
+    nTotal = n;          // total frames in the video (n is later reset to the analyzed frame count)
+    startF = 1;          // first frame analyzed
+    endF = nTotal;       // last frame analyzed
+    needRange = selectTimeRange;
     attempt = 0;
     accepted = false;
     skipped = false;
@@ -124,7 +137,45 @@ for (v = 0; v < nVideos; v++) {
 
         attempt++;
         selectImage(videoID);
-        setSlice(1);
+
+        // ---------------- CHOOSE PORTION OF VIDEO ----------------
+        // Scroll to the first and last frame to analyze (once per video,
+        // and again only if you pick "Change time range" at review).
+        if (needRange) {
+            setSlice(startF);
+            waitForUser(
+                "Video " + (v + 1) + " of " + nVideos + ": " + fileName + "\n \n" +
+                "Scroll to the FIRST frame to analyze\n" +
+                "(slider at the bottom of the video window),\n" +
+                "then click OK.\n \n" +
+                "Video has " + nTotal + " frames (" + d2s((nTotal - 1) / fps, 1) + " s)."
+            );
+            newStart = getSliceNumber();
+
+            if (endF < newStart) endF = nTotal;
+            setSlice(endF);
+            waitForUser(
+                "Video " + (v + 1) + " of " + nVideos + ": " + fileName + "\n \n" +
+                "Start frame set to " + newStart + ".\n" +
+                "Now scroll to the LAST frame to analyze,\n" +
+                "then click OK."
+            );
+            newEnd = getSliceNumber();
+
+            if (newEnd - newStart + 1 < 5) {
+                print("  WARNING: selected range (" + newStart + "-" + newEnd +
+                      ") is under 5 frames; using the whole video instead");
+                startF = 1;
+                endF = nTotal;
+            } else {
+                startF = newStart;
+                endF = newEnd;
+            }
+            print("  Analyzing frames " + startF + "-" + endF + " of " + nTotal);
+            needRange = false;
+        }
+
+        setSlice(startF);
 
         // Ask the user to define the heart region
         if (attempt == 1) {
@@ -149,6 +200,9 @@ for (v = 0; v < nVideos; v++) {
             break;
         }
 
+        // From here on, n = number of frames ANALYZED (the selected range)
+        n = endF - startF + 1;
+
         // Arrays
         time = newArray(n);
         signal = newArray(n);
@@ -158,13 +212,14 @@ for (v = 0; v < nVideos; v++) {
         run("Set Measurements...", "mean redirect=None decimal=3");
 
         // ---------------- MEASURE SIGNAL ----------------
+        // Time is measured from the start of the selected range
         for (i = 1; i <= n; i++) {
-            setSlice(i);
+            setSlice(startF + i - 1);
             run("Measure");
             signal[i-1] = getResult("Mean", i-1);
             time[i-1] = (i-1) / fps;
         }
-        setSlice(1);
+        setSlice(startF);
 
         // ---------------- SMOOTH SIGNAL ----------------
         for (i = 0; i < n; i++) {
@@ -268,6 +323,8 @@ for (v = 0; v < nVideos; v++) {
         Dialog.create("Review trace: " + fileName);
         Dialog.addMessage(
             "Video " + (v + 1) + " of " + nVideos + "   (attempt " + attempt + ")\n" +
+            "Frames analyzed: " + startF + "-" + endF + " of " + nTotal +
+            "  (" + d2s(duration_sec, 1) + " s)\n" +
             "Beats: " + beats + "     BPM: " + d2s(bpm, 1)
         );
         Dialog.addChoice(
@@ -275,6 +332,7 @@ for (v = 0; v < nVideos; v++) {
             newArray(
                 "Accept and go to next video",
                 "Redraw ventricle and re-analyze",
+                "Change time range and re-analyze",
                 "Skip this video (do not save)"
             ),
             "Accept and go to next video"
@@ -320,6 +378,8 @@ for (v = 0; v < nVideos; v++) {
             line =
                 baseName + "," +
                 fps + "," +
+                startF + "," +
+                endF + "," +
                 n + "," +
                 d2s(duration_sec, 3) + "," +
                 beats + "," +
@@ -339,6 +399,14 @@ for (v = 0; v < nVideos; v++) {
             print("  Attempt " + attempt + " rejected (BPM " + d2s(bpm, 1) +
                   "); redrawing ROI");
             // Close only the trace; keep the video open
+            selectImage(plotID);
+            close();
+            selectImage(videoID);
+
+        } else if (startsWith(choice, "Change time range")) {
+            print("  Attempt " + attempt + " rejected (BPM " + d2s(bpm, 1) +
+                  "); choosing a new time range");
+            needRange = true;
             selectImage(plotID);
             close();
             selectImage(videoID);
