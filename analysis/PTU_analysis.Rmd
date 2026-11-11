@@ -27,12 +27,13 @@ library(car)
 ```
 
 ```{r}
-hr <- read_csv("heart_rate.csv")
+data <- read_csv("../data/TRAR11_F2_PTU.csv")
 
-hr <- hr %>%
+data <- data %>%
   clean_names()
 
-str(hr)
+str(data)
+```
 ```
 
 ```{r}
