@@ -1,0 +1,448 @@
+---
+title: "PTU_analysis"
+output: html_document
+---
+
+---
+title: "PTU analysis"
+author: "Hayden Simm"
+date: "2026-07-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(purrr)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(dplyr)
+library(janitor)
+library(car)
+```
+
+```{r}
+hr <- read_csv("heart_rate.csv")
+
+hr <- hr %>%
+  clean_names()
+
+str(hr)
+```
+
+```{r}
+hr_data <- hr %>%
+  select(
+    concentration_ug_l,
+    heart_rate_bpm) %>%
+  filter(!is.na(heart_rate_bpm)) %>%
+  mutate(concentration_ug_l = factor(concentration_ug_l))
+
+str(hr_data)
+```
+
+heart rate linear model
+```{r}
+heart_model<-lm(heart_rate_bpm ~ concentration_ug_l, data = hr_data)
+summary(heart_model)
+```
+
+heart rate ANOVA
+```{r}
+hr_anova<-aov(heart_rate_bpm ~ concentration_ug_l, data = hr_data)
+summary(hr_anova)
+```
+
+```{r}
+hatch <- read_csv("hatching.csv")
+
+hatch <- hatch %>%
+  clean_names()
+
+str(hatch)
+```
+
+```{r}
+hatch_data <- hatch %>%
+  select(
+    concentration_ug_l,
+    contains("percent_hatched"),
+    plate_number)
+```
+
+long form hatch data
+```{r}
+hatch_long <- hatch_data %>%
+  select(
+    concentration_ug_l,
+    plate_number,
+    x2_dpf_percent_hatched,
+    x3dpf_percent_hatched,
+    x4dpf_percent_hatched
+  ) %>%
+  pivot_longer(
+    cols = starts_with("x"),
+    names_to = "dpf",
+    values_to = "percent_hatched"
+  ) %>%
+  mutate(
+    dpf = dplyr::recode(
+  dpf,
+  "x2_dpf_percent_hatched" = "2",
+  "x3dpf_percent_hatched" = "3",
+  "x4dpf_percent_hatched" = "4"
+),
+    dpf = factor(dpf),
+    concentration_ug_l = factor(concentration_ug_l),
+    plate_number = factor(plate_number)
+  )
+```
+
+hatch model
+```{r}
+hatch_model <- lm(
+  percent_hatched ~ concentration_ug_l * dpf + plate_number,
+  data = hatch_long
+)
+
+summary(hatch_model)
+anova(hatch_model)
+```
+
+pair-wise post hoc
+```{r}
+emm_hatch <- emmeans(hatch_model, ~ concentration_ug_l | dpf)
+
+pairs(emm_hatch, adjust = "tukey")
+```
+
+```{r}
+library(ggplot2)
+
+heart_plot <- ggplot(hr_data, aes(x = concentration_ug_l, y = heart_rate_bpm)) +
+
+  # Mean ± SE
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 3,
+    color = "black"
+  ) +
+
+  stat_summary(
+    fun.data = mean_se,
+    geom = "errorbar",
+    width = 0.15,
+    color = "black"
+  ) +
+
+  # Raw data
+  geom_jitter(
+    aes(color = concentration_ug_l),
+    width = 0.15,
+    alpha = 0.6,
+    size = 2
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "0"       = "#00441B",  # darkest green
+      "1e-04"   = "#238B45",
+      "0.001"   = "#41AB5D",
+      "0.01"    = "#74C476",
+      "0.1"     = "#A1D99B"   # lightest green
+    ),
+    guide = "none"
+  ) +
+
+  labs(
+    x = expression("PTU Concentration (g/L)"),
+    y = "Heart rate (bpm)"
+  ) +
+
+  theme_bw()
+```
+
+```{r}
+ggsave(
+  filename = "ICBF_figures/heart_rate.png",
+  plot = heart_plot,
+  width = 8,
+  height = 4,
+  dpi = 300
+)
+```
+
+```{r}
+hatch_plot <- ggplot(
+  hatch_long,
+  aes(
+    x = dpf,
+    y = percent_hatched,
+    colour = concentration_ug_l,
+    group = concentration_ug_l
+  )
+) +
+
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 1.2
+  ) +
+
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 3
+  ) +
+
+  stat_summary(
+    fun.data = mean_se,
+    geom = "errorbar",
+    width = 0.15
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "0"      = "#00441B",
+      "1e-04"  = "#238B45",
+      "0.001"  = "#41AB5D",
+      "0.01"   = "#74C476",
+      "0.1"    = "#A1D99B"
+    ),
+    name = expression("PTU (g/L)")
+  ) +
+
+  labs(
+    x = "Days post fertilization",
+    y = "Percent hatched (%)"
+  ) +
+  theme_bw()
+```
+
+```{r}
+ggsave(
+  filename = "ICBF_figures/hatch.png",
+  plot = hatch_plot,
+  width = 8,
+  height = 4,
+  dpi = 300
+)
+```
+
+```{r}
+mortality <- read_csv("mortality.csv")
+
+mortality <- mortality %>%
+  clean_names()
+
+str(mortality)
+```
+
+```{r}
+mortality_data <- mortality %>%
+  select(
+    concentration_ug_l,
+    contains("percent_survival"),
+    plate_number)
+
+str(mortality_data)
+```
+
+long form mortality data
+```{r}
+mortality_long <- mortality_data %>%
+  pivot_longer(
+    cols = starts_with("x"),
+    names_to = "dpf",
+    values_to = "percent_survival"
+  ) %>%
+  mutate(
+    dpf = factor(
+      gsub("_dpf_percent_survival", "", gsub("x", "", dpf)),
+      levels = 1:10
+    ),
+    concentration_ug_l = factor(concentration_ug_l),
+    plate_number = factor(plate_number)
+  )
+```
+
+mortality model
+```{r}
+mortality_model <- lm(
+  percent_survival ~ concentration_ug_l * dpf + plate_number,
+  data = mortality_long
+)
+
+summary(mortality_model)
+anova(mortality_model)
+```
+
+pair-wise post hoc
+```{r}
+emm_mortality <- emmeans(mortality_model, ~ concentration_ug_l | dpf)
+
+pairs(emm_mortality, adjust = "tukey")
+```
+
+```{r}
+mortality_plot <- ggplot(
+  mortality_long,
+  aes(
+    x = dpf,
+    y = percent_survival,
+    colour = concentration_ug_l,
+    group = concentration_ug_l
+  )
+) +
+
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 1.2
+  ) +
+
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 3
+  ) +
+
+  stat_summary(
+    fun.data = mean_se,
+    geom = "errorbar",
+    width = 0.15
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "0"      = "#00441B",
+      "1e-04"  = "#238B45",
+      "0.001"  = "#41AB5D",
+      "0.01"   = "#74C476",
+      "0.1"    = "#A1D99B"
+    ),
+    name = expression("PTU (g/L)")
+  ) +
+
+  labs(
+    x = "Days post fertilization",
+    y = "Percent survival (%)"
+  ) +
+  theme_bw()
+```
+
+```{r}
+ggsave(
+  filename = "ICBF_figures/mortality.png",
+  plot = mortality_plot,
+  width = 8,
+  height = 4,
+  dpi = 300
+)
+```
+
+gfp data
+```{r}
+gfp_reduced <- read_csv("gfp_reduced.csv")
+
+gfp_reduced <- gfp_reduced %>%
+  clean_names()
+
+str(gfp_reduced)
+```
+
+```{r}
+gfp_reduced <- gfp_reduced %>%
+  mutate(concentration_g_l = factor(concentration_g_l))
+
+str(gfp_reduced)
+```
+
+```{r}
+log_gfp_reduced <- gfp_reduced %>%
+  filter(ctcf >= 0) %>%
+  mutate(log_ctcf = log(ctcf))
+  # if you want to set -neg values as 0 mutate(log_ctcf = ifelse(ctcf <= 0, 0, log(ctcf)))
+```
+
+```{r}
+gfp_plot <- ggplot(
+  log_gfp_reduced,
+  aes(
+    x = dpf,
+    y = log_ctcf,
+    colour = concentration_g_l,
+    group = concentration_g_l
+  )
+) +
+
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 1.2
+  ) +
+
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 3
+  ) +
+
+  stat_summary(
+    fun.data = mean_se,
+    geom = "errorbar",
+    width = 0.15
+  ) +
+
+  scale_color_manual(
+    values = c(
+      "0"      = "#00441B",
+      "1e-04"  = "#238B45",
+      "0.001"  = "#41AB5D",
+      "0.01"   = "#74C476",
+      "0.1"    = "#A1D99B"
+    ),
+    name = expression("PTU (g/L)")
+  ) +
+
+  labs(
+    x = "Days post fertilization",
+    y = "log Corrected total cell fluorescenece"
+  ) +
+  theme_bw()
+```
+
+```{r}
+ggsave(
+  filename = "ICBF_figures/gfp.png",
+  plot = gfp_plot,
+  width = 8,
+  height = 4,
+  dpi = 300
+)
+```
+
+gfp model
+```{r}
+gfp_model <- lm(
+  log_ctcf ~ concentration_g_l * dpf,
+  data = log_gfp_reduced
+)
+
+summary(gfp_model)
+anova(gfp_model)
+```
+
+
+pair-wise post hoc
+```{r}
+emm_gfp <- emmeans(gfp_model, ~ concentration_g_l | dpf)
+
+pairs(emm_gfp, adjust = "tukey")
+```
