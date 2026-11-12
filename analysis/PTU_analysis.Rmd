@@ -37,12 +37,12 @@ str(data)
 ```
 
 ```{r}
-hr_data <- hr %>%
+hr_data <- data %>%
   select(
     concentration_ug_l,
     heart_rate_bpm) %>%
   filter(!is.na(heart_rate_bpm)) %>%
-  mutate(concentration_ug_l = factor(concentration_ug_l))
+  mutate(concentration_g_l = factor(concentration_ug_l))
 
 str(hr_data)
 ```
